@@ -14,7 +14,7 @@ type SAMLServiceProvider interface {
 	Metadata() *EntityDescriptor
 	MakeRedirectAuthenticationRequest(relayState string) (*url.URL, error)
 	GetSSOBindingLocation(binding string) string
-	getIDPSigningCert() (*x509.Certificate, error)
+	getIDPSigningCert(entityID string) (*x509.Certificate, error)
 	MakeAuthenticationRequest(idpURL string) (*AuthnRequest, error)
 	MakePostAuthenticationRequest(relayState string) ([]byte, error)
 	ParseResponse(req *http.Request, possibleRequestIDs []string) (*Assertion, error)

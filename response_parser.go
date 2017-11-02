@@ -88,7 +88,7 @@ func (resp *Response) Parse(req *http.Request, possibleRequestIDs []string, sp S
 			return nil, retErr
 		}
 
-		if err = sp.validateSigned(responseEl); err != nil {
+		if err = sp.validateSigned(resp.Issuer.Value, responseEl); err != nil {
 			retErr.PrivateErr = err
 			return nil, retErr
 		}
@@ -117,7 +117,7 @@ func (resp *Response) Parse(req *http.Request, possibleRequestIDs []string, sp S
 			return nil, retErr
 		}
 
-		if err := sp.validateSigned(doc.Root()); err != nil {
+		if err := sp.validateSigned(resp.Issuer.Value, doc.Root()); err != nil {
 			retErr.PrivateErr = err
 			return nil, retErr
 		}

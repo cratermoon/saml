@@ -66,6 +66,9 @@ type ServiceProvider struct {
 	// IDPMetadata is the metadata from the identity provider.
 	IDPMetadata *EntityDescriptor
 
+	// IDPEntries is a map of EntityID to EntityDescriptor
+	IDPEntries map[string]*EntityDescriptor
+
 	// AuthnNameIDFormat is the format used in the NameIDPolicy for
 	// authentication requests
 	AuthnNameIDFormat NameIDFormat
@@ -204,9 +207,13 @@ func (sp *ServiceProvider) GetSSOBindingLocation(binding string) string {
 
 // getIDPSigningCert returns the certificate which we can use to verify things
 // signed by the IDP in PEM format, or nil if no such certificate is found.
-func (sp *ServiceProvider) getIDPSigningCert() (*x509.Certificate, error) {
+func (sp *ServiceProvider) getIDPSigningCert(entityID string) (*x509.Certificate, error) {
 	certStr := ""
-	for _, idpSSODescriptor := range sp.IDPMetadata.IDPSSODescriptors {
+	idpMetaData := sp.IDPMetadata
+	if sp.IDPEntries != nil {
+		idpMetaData = sp.IDPEntries[entityID]
+	}
+	for _, idpSSODescriptor := range idpMetaData.IDPSSODescriptors {
 		for _, keyDescriptor := range idpSSODescriptor.KeyDescriptors {
 			if keyDescriptor.Use == "signing" {
 				certStr = keyDescriptor.KeyInfo.Certificate
@@ -420,6 +427,8 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 		retErr.PrivateErr = fmt.Errorf("IssueInstant expired at %s", resp.IssueInstant.Add(MaxIssueDelay))
 		return nil, retErr
 	}
+	// TODO we don't need to match these, we just need to be able to find it in the list of
+	// configured IDPs
 	if resp.Issuer.Value != sp.IDPMetadata.EntityID {
 		retErr.PrivateErr = fmt.Errorf("Issuer does not match the IDP metadata (expected %q)", sp.IDPMetadata.EntityID)
 		return nil, retErr
@@ -445,7 +454,7 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 			return nil, retErr
 		}
 
-		if err = sp.validateSigned(responseEl); err != nil {
+		if err = sp.validateSigned(resp.Issuer.Value, responseEl); err != nil {
 			retErr.PrivateErr = err
 			return nil, retErr
 		}
@@ -474,7 +483,7 @@ func (sp *ServiceProvider) ParseResponse(req *http.Request, possibleRequestIDs [
 			return nil, retErr
 		}
 
-		if err := sp.validateSigned(doc.Root()); err != nil {
+		if err := sp.validateSigned(resp.Issuer.Value, doc.Root()); err != nil {
 			retErr.PrivateErr = err
 			return nil, retErr
 		}
@@ -572,7 +581,7 @@ func findChild(parentEl *etree.Element, childNS string, childTag string) (*etree
 
 // validateSigned returns a nil error iff each of the signatures on the Response and Assertion elements
 // are valid and there is at least one signature.
-func (sp *ServiceProvider) validateSigned(responseEl *etree.Element) error {
+func (sp *ServiceProvider) validateSigned(entityID string, responseEl *etree.Element) error {
 	haveSignature := false
 
 	// Some SAML responses have the signature on the Response object, and some on the Assertion
@@ -583,7 +592,7 @@ func (sp *ServiceProvider) validateSigned(responseEl *etree.Element) error {
 		return err
 	}
 	if sigEl != nil {
-		if err = sp.validateSignature(responseEl); err != nil {
+		if err = sp.validateSignature(entityID, responseEl); err != nil {
 			return fmt.Errorf("cannot validate signature on Response: %v", err)
 		}
 		haveSignature = true
@@ -599,7 +608,7 @@ func (sp *ServiceProvider) validateSigned(responseEl *etree.Element) error {
 			return err
 		}
 		if sigEl != nil {
-			if err = sp.validateSignature(assertionEl); err != nil {
+			if err = sp.validateSignature(entityID, assertionEl); err != nil {
 				return fmt.Errorf("cannot validate signature on Response: %v", err)
 			}
 			haveSignature = true
@@ -613,8 +622,8 @@ func (sp *ServiceProvider) validateSigned(responseEl *etree.Element) error {
 }
 
 // validateSignature returns nill iff the Signature embedded in the element is valid
-func (sp *ServiceProvider) validateSignature(el *etree.Element) error {
-	cert, err := sp.getIDPSigningCert()
+func (sp *ServiceProvider) validateSignature(entityID string, el *etree.Element) error {
+	cert, err := sp.getIDPSigningCert(entityID)
 	if err != nil {
 		return err
 	}
